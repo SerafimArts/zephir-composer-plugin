@@ -44,13 +44,13 @@ class Commands
      */
     public function run(string $process, string $directory = null, bool $quiet = false): int
     {
-        $this->io->write('  $ <comment>' . $process . '</comment>');
+        $this->io->write('      $ <comment>' . $process . '</comment>');
 
-        return (int)(new Process($process, $directory))
+        $result = (int)(new Process($process, $directory))
             ->run(function (string $type, string $stdout) use ($quiet) {
                 switch ($type) {
                     case Process::OUT:
-                        $this->io->write($stdout, false);
+                        $this->write($stdout);
                         break;
                     case Process::ERR:
                         if (!$quiet) {
@@ -59,5 +59,24 @@ class Commands
                         break;
                 }
             });
+
+        $this->io->overwrite('', false);
+
+        return $result;
+    }
+
+    /**
+     * @param string $message
+     */
+    private function write(string $message)
+    {
+        $lines = explode("\n", str_replace("\r", '', $message));
+
+        foreach ($lines as $line) {
+
+            if ($line) {
+                $this->io->overwrite($line, false);
+            }
+        }
     }
 }

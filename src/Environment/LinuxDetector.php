@@ -65,7 +65,6 @@ class LinuxDetector extends AbstractDetector
         yield (new Requirement('phpize', function () {
             return $this->hasBinary('phpize');
         }))
-
             ->onError($this->installDependency('php-dev'));
 
         // Zephir
@@ -73,12 +72,12 @@ class LinuxDetector extends AbstractDetector
             return $this->hasBinary('zephir');
         }))
             ->onError(function (IOInterface $io) {
-                $io->write('Install zephir first:');
-                $io->write('  $ <comment>git clone git@github.com:phalcon/zephir.git</comment>');
-                $io->write('  $ <comment>cd zephir</comment>');
-                $io->write('  $ <comment>./install</comment>');
-
-                return false;
+                $io->write('<error>Please install zephir first</error>');
+                $io->write('    Instruction:');
+                $io->write('      1. <comment>git clone git@github.com:phalcon/zephir.git</comment>');
+                $io->write('      2. <comment>cd zephir</comment>');
+                $io->write('      3. <comment>./install</comment>');
+                $io->write('      ', false);
             });
     }
 
@@ -135,7 +134,7 @@ class LinuxDetector extends AbstractDetector
     private function installDependency(string $dependency): \Closure
     {
         return function (IOInterface $io, Commands $commands) use ($dependency) {
-            if (strtolower($io->ask('Try to install the dependency? [Y/n]', 'y')) === 'y') {
+            if (strtolower($io->ask('Install the dependency (sudo required)? [Y/n] ', 'y')) === 'y') {
                 return $this->install($commands, $dependency);
             }
 

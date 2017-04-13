@@ -19,13 +19,13 @@ use Composer\Script\Event as ScriptEvent;
 use Composer\Script\ScriptEvents;
 use Symfony\Component\Process\Exception\LogicException;
 use Symfony\Component\Process\Exception\RuntimeException;
-use Symfony\Component\Process\Process;
 use Zephir\Composer\Environment\DetectorFactory;
 use Zephir\Composer\Environment\Requirement;
 use Zephir\Composer\Exceptions\EnvironmentException;
 use Zephir\Composer\Exceptions\NotAllowedException;
 use Zephir\Composer\Exceptions\NotFoundException;
 use Zephir\Composer\Support\Commands;
+use Zephir\Composer\Support\ConfigRepository;
 
 /**
  * Class ComposerPlugin
@@ -33,6 +33,8 @@ use Zephir\Composer\Support\Commands;
  */
 class ComposerPlugin implements PluginInterface, EventSubscriberInterface
 {
+    const EXTRA_CONFIG_KEY = 'zephir';
+
     const EXTENSIONS_INI = 'zephir_extensions.ini';
 
     /**
@@ -44,11 +46,6 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
      * @var IOInterface
      */
     private $io;
-
-    /**
-     * @var bool
-     */
-    private $checkEnvironment = false;
 
     /**
      * @var string
@@ -119,27 +116,60 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
      */
     public function afterInstall(ScriptEvent $event)
     {
+        $status = $this->detectEnvironment();
+
+        if (!$status) {
+            throw new EnvironmentException('Broken environment configuration.');
+        }
+
+
         $extensions = [];
 
-        foreach ($this->getZephirConfigs() as $packageName => $config) {
-            $status = $this->detectEnvironment();
-
-            if (!$status) {
-                throw new EnvironmentException(
-                    'Can not compile ' . $packageName . ' sources. ' .
-                    'Broken environment configuration.'
-                );
-
-                return;
-            }
-
+        foreach ($this->getZephirConfigs() as $package => $config) {
             $extension = $this->compileZephirExtension($config);
             $extensions[] = $this->saveExtension($extension);
         }
 
         $this->createIniFile($extensions);
+    }
 
-        $this->io->write('Do not forget include ' . self::EXTENSIONS_INI . ' and restart server.');
+    /**
+     * @return bool
+     * @throws \LogicException
+     * @throws EnvironmentException
+     */
+    private function detectEnvironment(): bool
+    {
+        $status = true;
+
+        $detector = DetectorFactory::create($this->composer);
+
+        $this->io->write('<info>Checking ' . $detector->getName() . ' environment...</info>');
+
+        /** @var Requirement $requirement */
+        foreach ($detector->getRequirements() as $requirement) {
+            $message = '  - Dependency <info>' . $requirement->getName() . '</info>: ';
+
+            $this->io->overwrite($message, false);
+
+            $checked = $requirement->check($this->commands, $this->io);
+
+            if ($checked) {
+                $this->io->overwrite($message . '<info>OK</info>', false);
+            } else {
+                $this->io->write('<error>Fail</error>');
+            }
+
+            if (!$checked) {
+                $status = false;
+            }
+
+            usleep(50000);
+        }
+
+        $this->io->overwrite('', false);
+
+        return $status;
     }
 
     /**
@@ -148,19 +178,19 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
      */
     private function getZephirConfigs(): \Generator
     {
-        $vendor  = $this->getVendorDir();
+        $vendor = $this->getVendorDir();
         $message = '  - Zephir <info>%s</info> (<comment>%s</comment>)';
 
         foreach ($this->collectRootPackageSources() as $package => $config) {
-            $this->io->write(sprintf($message, $package, '~/' . $config));
+            $this->io->write(sprintf($message, $package->getName(), '~/' . $config));
 
             yield $package => $config;
         }
 
         foreach ($this->collectPackagesSources() as $package => $config) {
-            $path = $package . '/' . $config;
+            $path = $package->getName() . '/' . $config;
 
-            $this->io->write(sprintf($message, $package, '~/vendor/' . $path));
+            $this->io->write(sprintf($message, $package->getName(), '~/vendor/' . $path));
 
             yield $package => $vendor . '/' . $path;
         }
@@ -171,22 +201,29 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
      */
     private function collectRootPackageSources(): \Generator
     {
-        yield from $this->extractExtraSection($this->composer->getPackage());
+        $package = $this->composer->getPackage();
+        $config = $this->extractExtraSection($package);
+
+        if ($config !== null) {
+            foreach ($config->getLibraries() as $library) {
+                yield $package => $library;
+            }
+        }
     }
 
     /**
      * @param PackageInterface $package
-     * @return \Generator
+     * @return ConfigRepository|null
      */
-    private function extractExtraSection(PackageInterface $package): \Generator
+    private function extractExtraSection(PackageInterface $package)
     {
         $extra = $package->getExtra();
 
         if (isset($extra['zephir'])) {
-            foreach ((array)$extra['zephir'] as $config) {
-                yield $package->getName() => $config;
-            }
+            return new ConfigRepository($package, (array)$extra['zephir']);
         }
+
+        return null;
     }
 
     /**
@@ -197,45 +234,14 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
         $repo = $this->composer->getRepositoryManager()->getLocalRepository();
 
         foreach ($repo->getPackages() as $package) {
-            yield from $this->extractExtraSection($package);
-        }
-    }
+            $config = $this->extractExtraSection($package);
 
-    /**
-     * @return bool
-     * @throws EnvironmentException
-     */
-    private function detectEnvironment(): bool
-    {
-        if ($this->checkEnvironment === false) {
-            $status = true;
-
-            $detector = DetectorFactory::create($this->composer);
-
-            $this->io->write('<info>Checking ' . $detector->getName() . ' environment...</info>');
-
-            /** @var Requirement $requirement */
-            foreach ($detector->getRequirements() as $requirement) {
-                $this->io->write('  - <comment>' . $requirement->getName() . '</comment>: ', false);
-
-                $checked = $requirement->check($this->commands, $this->io);
-
-                $this->io->overwrite(
-                    '  - <comment>' . $requirement->getName() . '</comment>: ' .
-                        ($checked ? '<info>OK</info>' : '<error>Fail</error>')
-                );
-
-                if (!$checked) {
-                    $status = false;
+            if ($config !== null) {
+                foreach ($config->getLibraries() as $library) {
+                    yield $package => $library;
                 }
             }
-
-            $this->checkEnvironment = true;
-
-            return $status;
         }
-
-        return true;
     }
 
     /**
@@ -247,8 +253,6 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
      */
     private function compileZephirExtension(string $config)
     {
-        $this->io->write('<info>Compiling...</info>');
-
         if ($code = $this->run('zephir fullclean', $config)) {
             exit($code);
         }
@@ -301,15 +305,6 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
         $name = basename($ext);
         $dest = $this->ext . '/' . $name;
 
-        $this->io->write(
-            '<info>' .
-                'Copying extension ' .
-                '<comment>' . $name . '</comment>' .
-                    ' into ' .
-                '<comment>' . $dest . '</comment>' .
-            '</info>'
-        );
-
         if (!@unlink($dest) && is_file($dest)) {
             throw new NotAllowedException('Could not delete previous version of ' . $name);
         }
@@ -338,7 +333,5 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
         }, $extensions);
 
         file_put_contents($ini, implode("\n", $iniBody));
-
-        $this->io->write('<info>Creating (<comment>' . $ini . '</comment>)</info>');
     }
 }
