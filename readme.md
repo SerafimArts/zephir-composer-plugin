@@ -6,22 +6,29 @@ Your can found example here: [SerafimArts/zephir-example](https://github.com/Ser
 
 ## Usage
 
-1) Open your [`composer.json`](https://getcomposer.org/doc/01-basic-usage.md).
-2) Add path to [`config.json`](https://docs.zephir-lang.com/en/latest/config.html) into `extra` section, like:
+1) Add plugin: `composer require serafim/zephir-composer-plugin`
+2) Open your [`composer.json`](https://getcomposer.org/doc/01-basic-usage.md).
+3) Add path to [`config.json`](https://docs.zephir-lang.com/en/latest/config.html) into `extra`.`zephir` section:
 ```json
 {
+    "require": {
+        "serafim/zephir-composer-plugin": "dev-master@dev"    
+    },
     "extra": {
         "zephir": [
-            "src/config.json"            
+            "your/src/config.json"            
         ]
     }
 }
 ```
+4) Run `composer install` or `composer update`
 
-## Usage example
+## Fast start (plugin testing)
 
-See [zephir-example](https://github.com/SerafimArts/zephir-example)
+See [zephir-example](https://github.com/SerafimArts/zephir-example). 
+This is an example of "Hello World" zephir extension.
 
+1) Add "hello world" (`serafim/zephir-example`) into your `composer.json`:
 ```json
 {
     "require": {
@@ -30,3 +37,4 @@ See [zephir-example](https://github.com/SerafimArts/zephir-example)
     }
 }
 ```
+2) Run `composer install` or `composer update`
