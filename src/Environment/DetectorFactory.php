@@ -10,6 +10,7 @@ declare(strict_types=1);
 namespace Zephir\Composer\Environment;
 
 use Composer\Composer;
+use Zephir\Composer\Exceptions\EnvironmentException;
 
 /**
  * Class DetectorFactory
@@ -20,19 +21,22 @@ class DetectorFactory
     /**
      * @param Composer $composer
      * @return DetectorInterface
+     * @throws \LogicException
      * @throws EnvironmentException
      */
     public static function create(Composer $composer): DetectorInterface
     {
         switch (true) {
-            case self::isWindows():
-                return new WindowsDetector($composer);
-
             case self::isLinux():
                 return new LinuxDetector($composer);
 
+            case self::isWindows():
+                throw new \LogicException('Windows environment does not support yet.');
+                //
+
             case self::isDarwin():
-                return new DarwinDetector($composer);
+                throw new \LogicException('MacOS environment does not support yet.');
+                //
         }
 
         $error = sprintf('Can not detect environment. Invalid operation system %s', PHP_OS);

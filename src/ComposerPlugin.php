@@ -17,9 +17,15 @@ use Composer\Package\PackageInterface;
 use Composer\Plugin\PluginInterface;
 use Composer\Script\Event as ScriptEvent;
 use Composer\Script\ScriptEvents;
+use Symfony\Component\Process\Exception\LogicException;
+use Symfony\Component\Process\Exception\RuntimeException;
 use Symfony\Component\Process\Process;
 use Zephir\Composer\Environment\DetectorFactory;
-use Zephir\Composer\Environment\EnvironmentException;
+use Zephir\Composer\Environment\Requirement;
+use Zephir\Composer\Exceptions\EnvironmentException;
+use Zephir\Composer\Exceptions\NotAllowedException;
+use Zephir\Composer\Exceptions\NotFoundException;
+use Zephir\Composer\Support\Commands;
 
 /**
  * Class ComposerPlugin
@@ -50,6 +56,11 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
     private $ext;
 
     /**
+     * @var Commands
+     */
+    private $commands;
+
+    /**
      * @return array
      */
     public static function getSubscribedEvents(): array
@@ -65,13 +76,16 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
      * @param BaseEvent $event
      * @throws EnvironmentException
      * @throws \RuntimeException
+     * @throws NotAllowedException
      */
     public function onInit(BaseEvent $event)
     {
+        $this->commands = new Commands($this->io);
+
         $this->ext = $this->getVendorDir() . DIRECTORY_SEPARATOR . 'ext';
 
-        if (! @mkdir($this->ext) && ! is_dir($this->ext)) {
-            throw new EnvironmentException('Can not create ' . $this->ext . ' directory.');
+        if (!@mkdir($this->ext) && !is_dir($this->ext)) {
+            throw new NotAllowedException('Can not create ' . $this->ext . ' directory.');
         }
     }
 
@@ -98,9 +112,10 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
      * @param ScriptEvent $event
      * @throws EnvironmentException
      * @throws \RuntimeException
-     * @throws \Symfony\Component\Process\Exception\LogicException
-     * @throws \Symfony\Component\Process\Exception\RuntimeException
-     * @throws \InvalidArgumentException
+     * @throws LogicException
+     * @throws RuntimeException
+     * @throws NotFoundException
+     * @throws NotAllowedException
      */
     public function afterInstall(ScriptEvent $event)
     {
@@ -109,8 +124,8 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
         foreach ($this->getZephirConfigs() as $packageName => $config) {
             $status = $this->detectEnvironment();
 
-            if (! $status) {
-                $this->io->writeError(
+            if (!$status) {
+                throw new EnvironmentException(
                     'Can not compile ' . $packageName . ' sources. ' .
                     'Broken environment configuration.'
                 );
@@ -118,26 +133,12 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
                 return;
             }
 
-            $this->io->write('Compile ' . $packageName . ' sources...');
-
             $extension = $this->compileZephirExtension($config);
             $extensions[] = $this->saveExtension($extension);
         }
 
+        $this->createIniFile($extensions);
 
-        $ini = $this->ext . '/' . self::EXTENSIONS_INI;
-        if (! @unlink($ini) && is_file($ini)) {
-            throw new EnvironmentException('Could not delete previous version of ' . self::EXTENSIONS_INI);
-        }
-
-        $this->io->write('Compiled extensions: ' . implode(', ', $extensions));
-
-        $iniBody = array_map(function (string $name) {
-            return 'extension=./' . $name;
-        }, $extensions);
-        file_put_contents($ini, implode("\n", $iniBody));
-
-        $this->io->write('Adding a new extensions in ' . $ini);
         $this->io->write('Do not forget include ' . self::EXTENSIONS_INI . ' and restart server.');
     }
 
@@ -147,16 +148,21 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
      */
     private function getZephirConfigs(): \Generator
     {
-        $vendor = $this->getVendorDir();
+        $vendor  = $this->getVendorDir();
+        $message = '  - Zephir <info>%s</info> (<comment>%s</comment>)';
 
         foreach ($this->collectRootPackageSources() as $package => $config) {
-            $this->io->write($package . ' provides "' . $config . '"" zephir configuration.');
+            $this->io->write(sprintf($message, $package, '~/' . $config));
+
             yield $package => $config;
         }
 
         foreach ($this->collectPackagesSources() as $package => $config) {
-            $this->io->write($package . ' provides "' . $config . '" zephir configuration.');
-            yield $package => $vendor . '/' . $package . '/' . $config;
+            $path = $package . '/' . $config;
+
+            $this->io->write(sprintf($message, $package, '~/vendor/' . $path));
+
+            yield $package => $vendor . '/' . $path;
         }
     }
 
@@ -197,7 +203,7 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
 
     /**
      * @return bool
-     * @throws Environment\EnvironmentException
+     * @throws EnvironmentException
      */
     private function detectEnvironment(): bool
     {
@@ -206,12 +212,20 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
 
             $detector = DetectorFactory::create($this->composer);
 
-            $this->io->write('Checking environment for ' . $detector->getName() . '...');
+            $this->io->write('<info>Checking ' . $detector->getName() . ' environment...</info>');
 
-            foreach ($detector->check() as $item => $exists) {
-                $this->io->write(' - ' . $item . ': ' . ($exists ? 'OK' : 'Fail'));
+            /** @var Requirement $requirement */
+            foreach ($detector->getRequirements() as $requirement) {
+                $this->io->write('  - <comment>' . $requirement->getName() . '</comment>: ', false);
 
-                if (! $exists) {
+                $checked = $requirement->check($this->commands, $this->io);
+
+                $this->io->overwrite(
+                    '  - <comment>' . $requirement->getName() . '</comment>: ' .
+                        ($checked ? '<info>OK</info>' : '<error>Fail</error>')
+                );
+
+                if (!$checked) {
                     $status = false;
                 }
             }
@@ -221,18 +235,20 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
             return $status;
         }
 
-        return false;
+        return true;
     }
 
     /**
      * @param string $config
      * @return string
-     * @throws \InvalidArgumentException
-     * @throws \Symfony\Component\Process\Exception\LogicException
-     * @throws \Symfony\Component\Process\Exception\RuntimeException
+     * @throws NotFoundException
+     * @throws RuntimeException
+     * @throws LogicException
      */
     private function compileZephirExtension(string $config)
     {
+        $this->io->write('<info>Compiling...</info>');
+
         if ($code = $this->run('zephir fullclean', $config)) {
             exit($code);
         }
@@ -251,35 +267,25 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
      * @param string $process
      * @param string $config
      * @return int
-     * @throws \Symfony\Component\Process\Exception\LogicException
-     * @throws \Symfony\Component\Process\Exception\RuntimeException
+     * @throws LogicException
+     * @throws RuntimeException
      */
-    private function run(string $process, string $config): int
+    public function run(string $process, string $config): int
     {
-        $this->io->write($process);
-
-        return (new Process($process, dirname($config)))
-            ->run(function (string $type, string $stdout) {
-                switch ($type) {
-                    case Process::OUT:
-                        return $this->io->write($stdout);
-                    case Process::ERR:
-                        return $this->io->writeError($stdout);
-                }
-            });
+        return $this->commands->run($process, dirname($config));
     }
 
     /**
      * @param string $dir
      * @return string
-     * @throws \InvalidArgumentException
+     * @throws NotFoundException
      */
     private function findExtension(string $dir): string
     {
         $items = array_merge(glob($dir . '/*.so'), glob($dir . '/*.dll'));
 
-        if (! count($items)) {
-            throw new \InvalidArgumentException('Could not find extension in ' . $dir);
+        if (!count($items)) {
+            throw new NotFoundException('Could not find extension in ' . $dir);
         }
 
         return reset($items);
@@ -288,23 +294,51 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
     /**
      * @param string $ext
      * @return string
-     * @throws EnvironmentException
+     * @throws NotAllowedException
      */
     private function saveExtension(string $ext): string
     {
         $name = basename($ext);
         $dest = $this->ext . '/' . $name;
 
-        $this->io->write('Copying extension ' . $name . ' into ' . $dest . '...');
+        $this->io->write(
+            '<info>' .
+                'Copying extension ' .
+                '<comment>' . $name . '</comment>' .
+                    ' into ' .
+                '<comment>' . $dest . '</comment>' .
+            '</info>'
+        );
 
-        if (! @unlink($dest) && is_file($dest)) {
-            throw new EnvironmentException('Could not delete previous version of ' . $name);
+        if (!@unlink($dest) && is_file($dest)) {
+            throw new NotAllowedException('Could not delete previous version of ' . $name);
         }
 
-        if (! copy($ext, $dest)) {
-            throw new EnvironmentException('Could not create a new version of ' . $name);
+        if (!copy($ext, $dest)) {
+            throw new NotAllowedException('Could not create a new version of ' . $name);
         }
 
         return $name;
+    }
+
+    /**
+     * @param array $extensions
+     * @throws NotAllowedException
+     */
+    private function createIniFile(array $extensions)
+    {
+        $ini = $this->ext . '/' . self::EXTENSIONS_INI;
+
+        if (!@unlink($ini) && is_file($ini)) {
+            throw new NotAllowedException('Could not delete previous version of ' . self::EXTENSIONS_INI);
+        }
+
+        $iniBody = array_map(function (string $name) {
+            return 'extension=./' . $name;
+        }, $extensions);
+
+        file_put_contents($ini, implode("\n", $iniBody));
+
+        $this->io->write('<info>Creating (<comment>' . $ini . '</comment>)</info>');
     }
 }

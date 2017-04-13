@@ -29,7 +29,13 @@ interface DetectorInterface
     public function getName(): string;
 
     /**
-     * @return array
+     * @return \Traversable|Requirement[]
      */
-    public function check(): array;
+    public function getRequirements(): \Traversable;
+
+    /**
+     * @param string $binary
+     * @return bool
+     */
+    public function hasBinary(string $binary): bool;
 }

@@ -7,12 +7,13 @@
  */
 declare(strict_types=1);
 
-namespace Zephir\Composer\Environment;
+namespace Zephir\Composer\Exceptions;
 
 /**
- * Class EnvironmentException
- * @package Zephir\Composer\Environment
+ * Class NotFoundException
+ * @package Zephir\Composer\Exceptions
  */
-class EnvironmentException extends \DomainException
+class NotFoundException extends \LogicException
 {
+
 }
