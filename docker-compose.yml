@@ -1,0 +1,19 @@
+version: '2'
+
+services:
+    debian-7.0:
+        build:
+            context: ./docker/debian-7.0
+        volumes:
+            - "./src:/root/src"
+            - "./tests:/root/tests"
+            - "./composer.json:/root/composer.json"
+            - "./phpunit.xml:/root/phpunit.xml"
+    debian-7.1:
+        build:
+            context: ./docker/debian-7.1
+        volumes:
+            - "./src:/root/src"
+            - "./tests:/root/tests"
+            - "./composer.json:/root/composer.json"
+            - "./phpunit.xml:/root/phpunit.xml"
