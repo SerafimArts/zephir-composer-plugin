@@ -22,14 +22,6 @@ use Symfony\Component\Process\Exception\RuntimeException;
 class LinuxDetector extends AbstractDetector
 {
     /**
-     * @return string
-     */
-    public function getName(): string
-    {
-        return 'Linux';
-    }
-
-    /**
      * @return \Traversable|Requirement[]
      * @throws EnvironmentException
      * @throws RuntimeException

@@ -144,7 +144,7 @@ class ComposerPlugin implements PluginInterface, EventSubscriberInterface
 
         $detector = DetectorFactory::create($this->composer);
 
-        $this->io->write('<info>Checking ' . $detector->getName() . ' environment...</info>');
+        $this->io->write('<info>Building dependencies for ' . $detector->getName() . '...</info>');
 
         /** @var Requirement $requirement */
         foreach ($detector->getRequirements() as $requirement) {

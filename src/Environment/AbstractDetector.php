@@ -36,7 +36,7 @@ abstract class AbstractDetector implements DetectorInterface
      */
     public function getName(): string
     {
-        return static::class;
+        return PHP_OS;
     }
 
     /**
