@@ -1,6 +1,6 @@
 # Zephir Composer Plugin
 
-Your can found example here: [SerafimArts/zephir-example](https://github.com/SerafimArts/zephir-example)
+This is easy way to compile and install zephir sources though composer dependency manager.
 
 ![https://habrastorage.org/files/d48/9bb/b6a/d489bbb6aa524b498f76c962eb392088.gif](https://habrastorage.org/files/d48/9bb/b6a/d489bbb6aa524b498f76c962eb392088.gif)
 
