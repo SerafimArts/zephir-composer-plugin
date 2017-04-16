@@ -3,7 +3,9 @@
 This is easy way to compile and install zephir sources though composer dependency manager.
 
 <p align="center">
+
 ![https://habrastorage.org/files/861/58f/35f/86158f35f42643b9a05793f1c58598c1.gif](https://habrastorage.org/files/861/58f/35f/86158f35f42643b9a05793f1c58598c1.gif)
+
 </p>
 
 ## Usage
